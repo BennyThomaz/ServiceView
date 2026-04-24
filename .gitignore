@@ -3,3 +3,4 @@ uploads/
 *.log
 .env
 CLAUDE.md
+git-command.txt

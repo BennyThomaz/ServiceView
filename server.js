@@ -12,6 +12,29 @@ const PORT = process.env.PORT || 3000;
 
 const upload = multer({ dest: path.join(__dirname, 'uploads') });
 
+// Optional default diagram loaded from a server-side folder path (process.argv[2])
+let defaultDiagram = null;
+
+async function loadDefaultDiagram(basePath) {
+    const jsonPath = path.join(basePath, 'config', 'ServiceSettings.json');
+    const xmlPath  = path.join(basePath, 'config', 'DynamicAdaptor.xml');
+    if (!fs.existsSync(jsonPath) || !fs.existsSync(xmlPath)) {
+        console.warn(`[default] Config files not found in ${path.join(basePath, 'config')} — skipping default diagram`);
+        return;
+    }
+    try {
+        const parser = new SettingsFileParser();
+        await parser.open(jsonPath, xmlPath);
+        const { graphXML, nodeProps, serviceIds } = getGraphXMLFromConfig(parser);
+        const services = parser.getServices();
+        const fileName = parser.getProjectPath() || path.basename(basePath);
+        defaultDiagram = { graphXML, nodeProps, serviceIds, services, fileName };
+        console.log(`[default] Loaded default diagram: ${fileName}`);
+    } catch (err) {
+        console.error('[default] Failed to load default diagram:', err.message);
+    }
+}
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
@@ -73,7 +96,13 @@ app.post('/api/load/diagram', upload.single('diagramFile'), async (req, res) => 
     }
 });
 
-app.listen(PORT, () => {
+app.get('/api/default-diagram', (req, res) => {
+    if (!defaultDiagram) return res.status(204).end();
+    res.json(defaultDiagram);
+});
+
+app.listen(PORT, async () => {
+    if (process.argv[2]) await loadDefaultDiagram(process.argv[2]);
     const url = `http://localhost:${PORT}`;
     console.log(`DynamicAdaptor Explorer running at ${url}`);
     const opener = process.platform === 'win32' ? `start "" "${url}"`

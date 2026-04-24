@@ -479,20 +479,21 @@
     });
 
     /* ─── Tab management ────────────────────────────────────── */
-    function createTab(fileName, type, graphXML, services, nodeProps, serviceIds) {
+    function createTab(fileName, type, graphXML, services, nodeProps, serviceIds, { pinned = false } = {}) {
         const id = ++tabCounter;
         const containerId = 'graph-' + id;
-        const tab = { id, name: fileName, type, containerId, services, graphXML, nodeProps: nodeProps || {}, serviceIds: serviceIds || {} };
+        const tab = { id, name: fileName, type, containerId, services, graphXML, nodeProps: nodeProps || {}, serviceIds: serviceIds || {}, pinned };
         tabs.push(tab);
 
         // Tab button
         const tabEl = document.createElement('div');
         tabEl.className = 'tab';
         tabEl.dataset.tabId = id;
+        const closeBtn = pinned ? '' : `<span class="tab-close" data-close="${id}" title="Close">×</span>`;
         tabEl.innerHTML = `
             <span class="tab-type-badge tab-type-${type}">${type}</span>
             <span class="tab-name" title="${escHtml(fileName)}">${escHtml(fileName)}</span>
-            <span class="tab-close" data-close="${id}" title="Close">×</span>`;
+            ${closeBtn}`;
         tabEl.addEventListener('click', e => {
             if (e.target.dataset.close) { closeTab(+e.target.dataset.close); return; }
             activateTab(id);
@@ -553,7 +554,7 @@
 
     function closeTab(id) {
         const idx = tabs.findIndex(t => t.id === id);
-        if (idx === -1) return;
+        if (idx === -1 || tabs[idx].pinned) return;
         const tab = tabs[idx];
 
         DiagramManager.destroy(tab.containerId);
@@ -759,6 +760,20 @@
         if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); document.getElementById('btn-zoom-out').click(); }
         if ((e.ctrlKey || e.metaKey) && e.key === '0') { e.preventDefault(); document.getElementById('btn-zoom-reset').click(); }
     });
+
+    /* ─── Default diagram (server-side path argument) ──────────── */
+    (async function loadDefaultDiagram() {
+        try {
+            const resp = await fetch('/api/default-diagram');
+            if (!resp.ok || resp.status === 204) return;
+            const data = await resp.json();
+            if (data.graphXML) {
+                createTab(data.fileName || 'Default', 'json', data.graphXML, data.services || [], data.nodeProps || {}, data.serviceIds || {}, { pinned: true });
+            }
+        } catch {
+            // No default diagram available
+        }
+    })();
 
     /* ─── Util ───────────────────────────────────────────────── */
     function escHtml(s) {
