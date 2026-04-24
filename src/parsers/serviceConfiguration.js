@@ -31,6 +31,21 @@ const DEFAULT_ARROW_COLOR = '#6a737d';
 
 const DEFAULT_CONN_STR = 'WPSConnectionString';
 
+const LAYOUT = {
+    SWIMLANE_X_START:   10,
+    SWIMLANE_Y_START:   60,
+    SWIMLANE_WIDTH:    200,
+    SWIMLANE_H_PER_ROW: 35,
+    SWIMLANE_COL_STEP: 300,
+    SWIMLANE_WRAP_X:   900,
+    EP_X_OFFSET:        10,
+    EP_Y_START:         45,
+    EP_HEIGHT:          30,
+    EP_WIDTH:          180,
+    DB_ICON_SIZE:       60,
+    GLOBE_ICON_SIZE:    20,
+};
+
 function esc(str) {
     return String(str || '')
         .replace(/&/g, '&amp;')
@@ -91,6 +106,20 @@ function buildNodeProps(node, serviceName, isSource, parser) {
     return { name: getAttr(node, 'name'), serviceName, isSource, basic, params };
 }
 
+// Renders endpoint node cells into a container and updates idRef.value for each allocated ID.
+function renderEndpointNodes(parts, endpoints, containerId, idRef) {
+    let epY = LAYOUT.EP_Y_START;
+    for (const ep of endpoints) {
+        ep.id = ++idRef.value;
+        parts.push(`<object label="${esc(ep.name)}" id="${ep.id}">`);
+        parts.push(`<mxCell style="${DEST_STYLE}" parent="${containerId}" vertex="1" value="${esc(ep.name)}">`);
+        parts.push(`<mxGeometry x="${LAYOUT.EP_X_OFFSET}" y="${epY}" width="${LAYOUT.EP_WIDTH}" height="${LAYOUT.EP_HEIGHT}" as="geometry"/>`);
+        parts.push('</mxCell></object>');
+        epY += LAYOUT.EP_HEIGHT;
+    }
+    return epY;
+}
+
 function getGraphXMLFromConfig(parser) {
     const defaultConnStr = parser.getConnectionStringName() || DEFAULT_CONN_STR;
     const serviceGroups = parser.getServiceGroups();
@@ -108,7 +137,7 @@ function getGraphXMLFromConfig(parser) {
     // Pass 1: draw service container swimlanes
     let cellId = 1;
     let maxHeight = 0;
-    let svcX = 10, svcY = 60;
+    let svcX = LAYOUT.SWIMLANE_X_START, svcY = LAYOUT.SWIMLANE_Y_START;
 
     for (const svc of serviceNames) {
         cellId++;
@@ -122,19 +151,19 @@ function getGraphXMLFromConfig(parser) {
             .replace('{fillColor}', GRP_COLORS[grpIdx < 0 ? 0 : grpIdx])
             .replace('{fontColor}', GRP_FONT_COLORS[grpIdx < 0 ? 0 : grpIdx]);
 
-        const height = (destList.length + 2) * 35 + 5;
+        const height = (destList.length + 2) * LAYOUT.SWIMLANE_H_PER_ROW + 5;
         if (height > maxHeight) maxHeight = height;
 
         parts.push(`<mxCell id="${cellId}" value="${esc(svc.name)}" style="${esc(style)}" parent="1" vertex="1">`);
-        parts.push(`<mxGeometry x="${svcX}" y="${svcY}" width="200" height="${height}" as="geometry"/>`);
+        parts.push(`<mxGeometry x="${svcX}" y="${svcY}" width="${LAYOUT.SWIMLANE_WIDTH}" height="${height}" as="geometry"/>`);
         parts.push('</mxCell>');
 
-        if (svcX > 900) {
-            svcX = 10;
-            svcY += maxHeight + 35;
+        if (svcX > LAYOUT.SWIMLANE_WRAP_X) {
+            svcX = LAYOUT.SWIMLANE_X_START;
+            svcY += maxHeight + LAYOUT.SWIMLANE_H_PER_ROW;
             maxHeight = 0;
         } else {
-            svcX += 300;
+            svcX += LAYOUT.SWIMLANE_COL_STEP;
         }
     }
 
@@ -148,7 +177,7 @@ function getGraphXMLFromConfig(parser) {
         const svcNode = parser.getService(svc.name);
         if (!svcNode) continue;
 
-        let destY = 45;
+        let destY = LAYOUT.EP_Y_START;
 
         // Source node
         const srcNode = getSourceNode(svcNode);
@@ -158,12 +187,12 @@ function getGraphXMLFromConfig(parser) {
             const srcName = getAttr(srcNode, 'name');
             parts.push(`<object label="${esc(srcName)}" id="${destId}">`);
             parts.push(`<mxCell style="${esc(SRC_STYLE)}" parent="${cellId}" vertex="1" value="${esc(srcName + ' -' + dest.commsType)}">`);
-            parts.push(`<mxGeometry x="10" y="${destY}" width="180" height="30" as="geometry"/>`);
+            parts.push(`<mxGeometry x="${LAYOUT.EP_X_OFFSET}" y="${destY}" width="${LAYOUT.EP_WIDTH}" height="${LAYOUT.EP_HEIGHT}" as="geometry"/>`);
             parts.push('</mxCell></object>');
             nodeProps[String(destId)] = buildNodeProps(srcNode, svc.name, true, parser);
             destinations.push(...destColl);
             destId++;
-            destY += 30;
+            destY += LAYOUT.EP_HEIGHT;
         }
 
         // Destination nodes
@@ -173,117 +202,85 @@ function getGraphXMLFromConfig(parser) {
             const dName = getAttr(destNode, 'name');
             parts.push(`<object label="${esc(dName)}" id="${destId}">`);
             parts.push(`<mxCell style="${esc(DEST_STYLE)}" parent="${cellId}" vertex="1" value="${esc(dName + ' -' + dest.commsType)}">`);
-            parts.push(`<mxGeometry x="10" y="${destY}" width="180" height="30" as="geometry"/>`);
+            parts.push(`<mxGeometry x="${LAYOUT.EP_X_OFFSET}" y="${destY}" width="${LAYOUT.EP_WIDTH}" height="${LAYOUT.EP_HEIGHT}" as="geometry"/>`);
             parts.push('</mxCell></object>');
             nodeProps[String(destId)] = buildNodeProps(destNode, svc.name, false, parser);
             destinations.push(...destColl);
             destId++;
-            destY += 30;
+            destY += LAYOUT.EP_HEIGHT;
         }
     }
 
-    // Pass 3: external destinations (HTTP hosts, DBs)
+    // Pass 3: external destinations (HTTP hosts, DBs, brokers, file system)
     const extDestinations = getExternalDestinations(destinations);
-    svcX = 10;
-    svcY += maxHeight + 35;
+    svcX = LAYOUT.SWIMLANE_X_START;
+    svcY += maxHeight + LAYOUT.SWIMLANE_H_PER_ROW;
     maxHeight = 0;
 
+    const idRef = { value: destId };
+
     for (const extDest of extDestinations) {
-        const containerId = ++destId;
+        const containerId = ++idRef.value;
         extDest.id = containerId;
 
         if (extDest.commsType === 'http') {
-            const height = (extDest.endPoints.length + 2) * 35 + 5;
+            const height = (extDest.endPoints.length + 2) * LAYOUT.SWIMLANE_H_PER_ROW + 5;
             if (height > maxHeight) maxHeight = height;
 
             parts.push(`<mxCell id="${containerId}" value="${esc(extDest.name)}" style="${esc(DEST_CONTAINER_STYLE)}" parent="1" vertex="1">`);
-            parts.push(`<mxGeometry x="${svcX}" y="${svcY}" width="200" height="${height}" as="geometry"/>`);
+            parts.push(`<mxGeometry x="${svcX}" y="${svcY}" width="${LAYOUT.SWIMLANE_WIDTH}" height="${height}" as="geometry"/>`);
             parts.push('</mxCell>');
 
             // Globe icon cell
-            parts.push(`<mxCell id="${++destId}" value="" style="image;html=1;image=images/internet-world-line-898370.ico;fillColor=#FFFFCC;movable=0;deletable=0;resizable=0;" parent="${containerId}" vertex="1">`);
-            parts.push('<mxGeometry x="20" width="20" height="20" as="geometry"/>');
+            parts.push(`<mxCell id="${++idRef.value}" value="" style="image;html=1;image=images/internet-world-line-898370.ico;fillColor=#FFFFCC;movable=0;deletable=0;resizable=0;" parent="${containerId}" vertex="1">`);
+            parts.push(`<mxGeometry x="${LAYOUT.GLOBE_ICON_SIZE}" width="${LAYOUT.GLOBE_ICON_SIZE}" height="${LAYOUT.GLOBE_ICON_SIZE}" as="geometry"/>`);
             parts.push('</mxCell>');
 
-            let epY = 45;
-            for (const ep of extDest.endPoints) {
-                const epId = ++destId;
-                ep.id = epId;
-                parts.push(`<object label="${esc(ep.name)}" id="${epId}">`);
-                parts.push(`<mxCell style="${esc(DEST_STYLE)}" parent="${containerId}" vertex="1" value="${esc(ep.name)}">`);
-                parts.push(`<mxGeometry x="10" y="${epY}" width="180" height="30" as="geometry"/>`);
-                parts.push('</mxCell></object>');
-                epY += 30;
-            }
+            renderEndpointNodes(parts, extDest.endPoints, containerId, idRef);
         } else if (extDest.commsType === 'db') {
             parts.push(`<mxCell id="${containerId}" value="${esc(extDest.name)}" style="${esc(DB_DEST_STYLE)}" parent="1" vertex="1">`);
-            parts.push(`<mxGeometry x="${svcX}" y="${svcY}" width="60" height="60" as="geometry"/>`);
+            parts.push(`<mxGeometry x="${svcX}" y="${svcY}" width="${LAYOUT.DB_ICON_SIZE}" height="${LAYOUT.DB_ICON_SIZE}" as="geometry"/>`);
             parts.push('</mxCell>');
-            if (maxHeight < 60) maxHeight = 60;
+            if (maxHeight < LAYOUT.DB_ICON_SIZE) maxHeight = LAYOUT.DB_ICON_SIZE;
         } else if (extDest.commsType === 'file') {
-            const height = (extDest.endPoints.length + 2) * 35 + 5;
+            const height = (extDest.endPoints.length + 2) * LAYOUT.SWIMLANE_H_PER_ROW + 5;
             if (height > maxHeight) maxHeight = height;
 
             parts.push(`<mxCell id="${containerId}" value="${esc(extDest.name)}" style="${esc(FILESYSTEM_STYLE)}" parent="1" vertex="1">`);
-            parts.push(`<mxGeometry x="${svcX}" y="${svcY}" width="200" height="${height}" as="geometry"/>`);
+            parts.push(`<mxGeometry x="${svcX}" y="${svcY}" width="${LAYOUT.SWIMLANE_WIDTH}" height="${height}" as="geometry"/>`);
             parts.push('</mxCell>');
 
-            let epY = 45;
-            for (const ep of extDest.endPoints) {
-                const epId = ++destId;
-                ep.id = epId;
-                parts.push(`<object label="${esc(ep.name)}" id="${epId}">`);
-                parts.push(`<mxCell style="${esc(DEST_STYLE)}" parent="${containerId}" vertex="1" value="${esc(ep.name)}">`);
-                parts.push(`<mxGeometry x="10" y="${epY}" width="180" height="30" as="geometry"/>`);
-                parts.push('</mxCell></object>');
-                epY += 30;
-            }
+            renderEndpointNodes(parts, extDest.endPoints, containerId, idRef);
         } else if (extDest.commsType === 'IBMMQ') {
-            const height = (extDest.endPoints.length + 2) * 35 + 5;
+            const height = (extDest.endPoints.length + 2) * LAYOUT.SWIMLANE_H_PER_ROW + 5;
             if (height > maxHeight) maxHeight = height;
 
             parts.push(`<mxCell id="${containerId}" value="${esc(extDest.name)}" style="${esc(IBMMQ_BROKER_STYLE)}" parent="1" vertex="1">`);
-            parts.push(`<mxGeometry x="${svcX}" y="${svcY}" width="200" height="${height}" as="geometry"/>`);
+            parts.push(`<mxGeometry x="${svcX}" y="${svcY}" width="${LAYOUT.SWIMLANE_WIDTH}" height="${height}" as="geometry"/>`);
             parts.push('</mxCell>');
 
-            let epY = 45;
-            for (const ep of extDest.endPoints) {
-                const epId = ++destId;
-                ep.id = epId;
-                parts.push(`<object label="${esc(ep.name)}" id="${epId}">`);
-                parts.push(`<mxCell style="${esc(DEST_STYLE)}" parent="${containerId}" vertex="1" value="${esc(ep.name)}">`);
-                parts.push(`<mxGeometry x="10" y="${epY}" width="180" height="30" as="geometry"/>`);
-                parts.push('</mxCell></object>');
-                epY += 30;
-            }
+            renderEndpointNodes(parts, extDest.endPoints, containerId, idRef);
         } else if (extDest.commsType === 'amq') {
-            const height = (extDest.endPoints.length + 2) * 35 + 5;
+            const height = (extDest.endPoints.length + 2) * LAYOUT.SWIMLANE_H_PER_ROW + 5;
             if (height > maxHeight) maxHeight = height;
 
             parts.push(`<mxCell id="${containerId}" value="${esc(extDest.name)}" style="${esc(AMQP_BROKER_STYLE)}" parent="1" vertex="1">`);
-            parts.push(`<mxGeometry x="${svcX}" y="${svcY}" width="200" height="${height}" as="geometry"/>`);
+            parts.push(`<mxGeometry x="${svcX}" y="${svcY}" width="${LAYOUT.SWIMLANE_WIDTH}" height="${height}" as="geometry"/>`);
             parts.push('</mxCell>');
 
-            let epY = 45;
-            for (const ep of extDest.endPoints) {
-                const epId = ++destId;
-                ep.id = epId;
-                parts.push(`<object label="${esc(ep.name)}" id="${epId}">`);
-                parts.push(`<mxCell style="${esc(DEST_STYLE)}" parent="${containerId}" vertex="1" value="${esc(ep.name)}">`);
-                parts.push(`<mxGeometry x="10" y="${epY}" width="180" height="30" as="geometry"/>`);
-                parts.push('</mxCell></object>');
-                epY += 30;
-            }
+            renderEndpointNodes(parts, extDest.endPoints, containerId, idRef);
         }
 
-        if (svcX > 900) {
-            svcX = 10;
-            svcY += maxHeight + 35;
+        if (svcX > LAYOUT.SWIMLANE_WRAP_X) {
+            svcX = LAYOUT.SWIMLANE_X_START;
+            svcY += maxHeight + LAYOUT.SWIMLANE_H_PER_ROW;
             maxHeight = 0;
         } else {
-            svcX += 300;
+            svcX += LAYOUT.SWIMLANE_COL_STEP;
         }
     }
+
+    destId = idRef.value;
 
     // Pass 4: connectors
     mapPeerIDs(destinations, extDestinations);
@@ -530,18 +527,17 @@ function getExternalDestinations(destinations) {
     return extDest;
 }
 
-function mapPeerIDs(destinations, extDestinations) {
-    // TCP client → TCP server (same address)
-    for (const d of destinations.filter(x => x.isClient && x.commsType === 'tcp')) {
-        const peer = destinations.find(x => x.commsType === 'tcp' && !x.isClient && x.address === d.address);
+// Matches internal client/server destination pairs by commsType and address.
+function matchInternalPeers(destinations, commsType) {
+    for (const d of destinations.filter(x => x.isClient && x.commsType === commsType)) {
+        const peer = destinations.find(x => x.commsType === commsType && !x.isClient && x.address === d.address);
         if (peer) { d.peerId = peer.id; d.externalDestination = false; }
     }
+}
 
-    // ICE client → ICE server
-    for (const d of destinations.filter(x => x.isClient && x.commsType === 'ICE')) {
-        const peer = destinations.find(x => x.commsType === 'ICE' && !x.isClient && x.address === d.address);
-        if (peer) { d.peerId = peer.id; d.externalDestination = false; }
-    }
+function mapPeerIDs(destinations, extDestinations) {
+    // P2P: client → server matched by commsType + address
+    for (const t of ['tcp', 'ICE', 'api']) matchInternalPeers(destinations, t);
 
     // HTTP client → external HTTP endpoint
     for (const d of destinations.filter(x => x.isClient && x.commsType === 'http')) {
@@ -583,12 +579,6 @@ function mapPeerIDs(destinations, extDestinations) {
             const ep = extBroker.endPoints.find(ep => ep.address === d.address);
             if (ep) { d.peerId = ep.id; d.externalDestination = true; }
         }
-    }
-
-    // WebAPI client → WebAPI server (same address)
-    for (const d of destinations.filter(x => x.isClient && x.commsType === 'api')) {
-        const peer = destinations.find(x => x.commsType === 'api' && !x.isClient && x.address === d.address);
-        if (peer) { d.peerId = peer.id; d.externalDestination = false; }
     }
 
     // File → external File System endpoint

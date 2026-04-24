@@ -24,20 +24,39 @@
     ];
 
     /* ─── DOM refs ──────────────────────────────────────────── */
-    const tabBar        = document.getElementById('tab-bar');
-    const diagramArea   = document.getElementById('diagram-area');
-    const welcome       = document.getElementById('welcome');
-    const zoomLevel     = document.getElementById('zoom-level');
-    const statusFile    = document.getElementById('status-file');
-    const statusSvcs    = document.getElementById('status-svcs');
-    const statusConns   = document.getElementById('status-conns');
-    const sidebarSvcs   = document.getElementById('sidebar-services');
+    const tabBar         = document.getElementById('tab-bar');
+    const diagramArea    = document.getElementById('diagram-area');
+    const welcome        = document.getElementById('welcome');
+    const zoomLevel      = document.getElementById('zoom-level');
+    const statusFile     = document.getElementById('status-file');
+    const statusSvcs     = document.getElementById('status-svcs');
+    const statusConns    = document.getElementById('status-conns');
+    const sidebarSvcs    = document.getElementById('sidebar-services');
     const spinnerOverlay = document.getElementById('spinner-overlay');
+    const propsPanel     = document.getElementById('props-panel');
+    const focusBar       = document.getElementById('service-focus-bar');
+    const focusName      = document.getElementById('service-focus-name');
+    const focusIconZoom  = document.getElementById('focus-icon-zoom');
+    const focusIconUnzoom= document.getElementById('focus-icon-unzoom');
+    const focusBtnLabel  = document.getElementById('focus-btn-label');
+    const connTypeFilters= document.getElementById('conn-type-filters');
+    const appEl          = document.getElementById('app');
+
+    const CLS = {
+        active:          'active',
+        dimmed:          'dimmed',
+        open:            'open',
+        visible:         'visible',
+        hidden:          'hidden',
+        propsCollapsed:  'props-collapsed',
+        sidebarCollapsed:'sidebar-collapsed',
+        gridVisible:     'grid-visible',
+    };
 
     /* ─── Properties panel ──────────────────────────────────── */
     const PropertiesPanel = {
         show(props) {
-            const el = document.getElementById('props-panel');
+            const el = propsPanel;
             if (!el) return;
 
             const addr = props.basic?.address || '';
@@ -83,11 +102,11 @@
                 });
             });
 
-            document.getElementById('app')?.classList.remove('props-collapsed');
+            appEl?.classList.remove(CLS.propsCollapsed);
         },
 
         showService(name, deps) {
-            const el = document.getElementById('props-panel');
+            const el = propsPanel;
             if (!el) return;
 
             let html = `<div class="props-node-header">
@@ -126,12 +145,11 @@
                 });
             });
 
-            document.getElementById('app')?.classList.remove('props-collapsed');
+            appEl?.classList.remove(CLS.propsCollapsed);
         },
 
         clear() {
-            const el = document.getElementById('props-panel');
-            if (el) el.innerHTML = '<div class="props-placeholder">Click a node to view properties</div>';
+            if (propsPanel) propsPanel.innerHTML = '<div class="props-placeholder">Click a node to view properties</div>';
         }
     };
 
@@ -212,16 +230,15 @@
     }
 
     function updateFocusBtn() {
-        const bar = document.getElementById('service-focus-bar');
         if (!selectedService || !activeTabId) {
-            bar.classList.remove('visible');
+            focusBar.classList.remove(CLS.visible);
             return;
         }
-        bar.classList.add('visible');
-        document.getElementById('service-focus-name').textContent = selectedService;
-        document.getElementById('focus-icon-zoom').style.display   = isZoomed ? 'none' : '';
-        document.getElementById('focus-icon-unzoom').style.display = isZoomed ? '' : 'none';
-        document.getElementById('focus-btn-label').textContent     = isZoomed ? 'Show All' : 'Focus';
+        focusBar.classList.add(CLS.visible);
+        focusName.textContent         = selectedService;
+        focusIconZoom.style.display   = isZoomed ? 'none' : '';
+        focusIconUnzoom.style.display = isZoomed ? '' : 'none';
+        focusBtnLabel.textContent     = isZoomed ? 'Show All' : 'Focus';
         document.getElementById('btn-focus-service').title = isZoomed ? 'Show all services' : 'Focus on ' + selectedService;
     }
 
@@ -233,7 +250,7 @@
         }
         updateFocusBtn();
         document.querySelectorAll('#sidebar-services .sidebar-item[data-service]').forEach(el => {
-            el.classList.toggle('active', el.dataset.service === selectedService);
+            el.classList.toggle(CLS.active, el.dataset.service === selectedService);
         });
     }
 
@@ -300,7 +317,7 @@
 
     /* ─── Connection type filter ────────────────────────────── */
     (function initConnTypeFilters() {
-        const container = document.getElementById('conn-type-filters');
+        const container = connTypeFilters;
         if (!container) return;
         for (const def of CONN_TYPE_DEFS) {
             const btn = document.createElement('div');
@@ -310,10 +327,10 @@
             btn.addEventListener('click', () => {
                 if (hiddenConnTypes.has(def.type)) {
                     hiddenConnTypes.delete(def.type);
-                    btn.classList.remove('dimmed');
+                    btn.classList.remove(CLS.dimmed);
                 } else {
                     hiddenConnTypes.add(def.type);
-                    btn.classList.add('dimmed');
+                    btn.classList.add(CLS.dimmed);
                 }
                 applyVisibility();
             });
@@ -347,8 +364,18 @@
 
     /* ─── Props panel collapse toggle ───────────────────────── */
     document.getElementById('btn-toggle-props').addEventListener('click', () => {
-        document.getElementById('app').classList.toggle('props-collapsed');
+        appEl.classList.toggle(CLS.propsCollapsed);
     });
+
+    /* ─── Helpers ───────────────────────────────────────────── */
+    function withActiveTab(fn) {
+        const t = activeTabId ? tabs.find(x => x.id === activeTabId) : null;
+        if (t) fn(t);
+    }
+
+    function closeDropdowns() {
+        document.querySelectorAll('.dropdown-menu.' + CLS.open).forEach(m => m.classList.remove(CLS.open));
+    }
 
     /* ─── Dropdown menus ────────────────────────────────────── */
     document.querySelectorAll('.dropdown').forEach(dd => {
@@ -356,13 +383,11 @@
         const menu = dd.querySelector('.dropdown-menu');
         btn.addEventListener('click', e => {
             e.stopPropagation();
-            document.querySelectorAll('.dropdown-menu.open').forEach(m => { if (m !== menu) m.classList.remove('open'); });
-            menu.classList.toggle('open');
+            document.querySelectorAll('.dropdown-menu.' + CLS.open).forEach(m => { if (m !== menu) m.classList.remove(CLS.open); });
+            menu.classList.toggle(CLS.open);
         });
     });
-    document.addEventListener('click', () => {
-        document.querySelectorAll('.dropdown-menu.open').forEach(m => m.classList.remove('open'));
-    });
+    document.addEventListener('click', closeDropdowns);
 
     /* ─── Upload modal ──────────────────────────────────────── */
     const uploadOverlay  = document.getElementById('upload-overlay');
@@ -384,8 +409,8 @@
         jsonFields.style.display    = mode === 'json'    ? '' : 'none';
         diagramFields.style.display = mode === 'diagram' ? '' : 'none';
         uploadForm.reset();
-        uploadOverlay.classList.add('open');
-        document.querySelectorAll('.dropdown-menu.open').forEach(m => m.classList.remove('open'));
+        uploadOverlay.classList.add(CLS.open);
+        closeDropdowns();
     }
 
     document.getElementById('btn-open-config').addEventListener('click',  () => openUploadModal('config'));
@@ -395,8 +420,8 @@
     document.getElementById('btn-open-json-welcome').addEventListener('click',    () => openUploadModal('json'));
     document.getElementById('btn-open-diag-welcome').addEventListener('click',    () => openUploadModal('diagram'));
 
-    document.getElementById('modal-cancel').addEventListener('click', () => uploadOverlay.classList.remove('open'));
-    uploadOverlay.addEventListener('click', e => { if (e.target === uploadOverlay) uploadOverlay.classList.remove('open'); });
+    document.getElementById('modal-cancel').addEventListener('click', () => uploadOverlay.classList.remove(CLS.open));
+    uploadOverlay.addEventListener('click', e => { if (e.target === uploadOverlay) uploadOverlay.classList.remove(CLS.open); });
 
     /* ─── Drop zone visual ──────────────────────────────────── */
     const dropZone = document.getElementById('drop-zone');
@@ -462,18 +487,18 @@
             fileName = file.name;
         }
 
-        uploadOverlay.classList.remove('open');
-        spinnerOverlay.classList.add('active');
+        uploadOverlay.classList.remove(CLS.open);
+        spinnerOverlay.classList.add(CLS.active);
 
         try {
             const endpoint = { config: '/api/load/config', json: '/api/load/json', diagram: '/api/load/diagram' }[mode];
             const resp = await fetch(endpoint, { method: 'POST', body: formData });
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error || 'Server error');
-            spinnerOverlay.classList.remove('active');
+            spinnerOverlay.classList.remove(CLS.active);
             createTab(data.fileName || fileName, mode, data.graphXML, data.services || [], data.nodeProps || {}, data.serviceIds || {});
         } catch (err) {
-            spinnerOverlay.classList.remove('active');
+            spinnerOverlay.classList.remove(CLS.active);
             showToast(err.message, 'error');
         }
     });
@@ -527,15 +552,15 @@
             const tabEl = tabBar.querySelector(`[data-tab-id="${t.id}"]`);
             const paneEl = document.getElementById('pane-' + t.id);
             if (t.id === id) {
-                tabEl?.classList.add('active');
-                paneEl?.classList.add('active');
+                tabEl?.classList.add(CLS.active);
+                paneEl?.classList.add(CLS.active);
             } else {
-                tabEl?.classList.remove('active');
-                paneEl?.classList.remove('active');
+                tabEl?.classList.remove(CLS.active);
+                paneEl?.classList.remove(CLS.active);
             }
         });
 
-        welcome.classList.add('hidden');
+        welcome.classList.add(CLS.hidden);
         selectedService = null;
         isZoomed = false;
         updateFocusBtn();
@@ -571,7 +596,7 @@
                 selectedService = null;
                 isZoomed = false;
                 updateFocusBtn();
-                welcome.classList.remove('hidden');
+                welcome.classList.remove(CLS.hidden);
                 updateStatus();
                 updateSidebar();
             }
@@ -583,7 +608,7 @@
     document.getElementById('btn-save-toolbar').addEventListener('click', saveDiagram);
 
     function saveDiagram() {
-        document.querySelectorAll('.dropdown-menu.open').forEach(m => m.classList.remove('open'));
+        closeDropdowns();
         if (!activeTabId) return showToast('No diagram open', 'error');
         const tab = tabs.find(t => t.id === activeTabId);
         if (!tab) return;
@@ -599,28 +624,20 @@
     }
 
     /* ─── Zoom controls ─────────────────────────────────────── */
-    document.getElementById('btn-zoom-in').addEventListener('click', () => {
-        if (activeTabId) { const t = tabs.find(x => x.id === activeTabId); if (t) DiagramManager.zoomIn(t.containerId); }
-    });
-    document.getElementById('btn-zoom-out').addEventListener('click', () => {
-        if (activeTabId) { const t = tabs.find(x => x.id === activeTabId); if (t) DiagramManager.zoomOut(t.containerId); }
-    });
-    document.getElementById('btn-zoom-reset').addEventListener('click', () => {
-        if (activeTabId) { const t = tabs.find(x => x.id === activeTabId); if (t) DiagramManager.resetZoom(t.containerId); }
-    });
-    document.getElementById('btn-fit-page').addEventListener('click', () => {
-        if (activeTabId) { const t = tabs.find(x => x.id === activeTabId); if (t) DiagramManager.fitPage(t.containerId); }
-    });
+    document.getElementById('btn-zoom-in').addEventListener('click',    () => withActiveTab(t => DiagramManager.zoomIn(t.containerId)));
+    document.getElementById('btn-zoom-out').addEventListener('click',   () => withActiveTab(t => DiagramManager.zoomOut(t.containerId)));
+    document.getElementById('btn-zoom-reset').addEventListener('click', () => withActiveTab(t => DiagramManager.resetZoom(t.containerId)));
+    document.getElementById('btn-fit-page').addEventListener('click',   () => withActiveTab(t => DiagramManager.fitPage(t.containerId)));
 
     /* ─── Sidebar ────────────────────────────────────────────── */
     document.getElementById('btn-toggle-sidebar').addEventListener('click', () => {
-        document.getElementById('app').classList.toggle('sidebar-collapsed');
+        appEl.classList.toggle(CLS.sidebarCollapsed);
     });
 
     /* ─── Grid toggle ───────────────────────────────────────── */
     document.getElementById('btn-toggle-grid').addEventListener('click', function () {
-        this.classList.toggle('active');
-        document.querySelectorAll('.graph-container').forEach(c => c.classList.toggle('grid-visible'));
+        this.classList.toggle(CLS.active);
+        document.querySelectorAll('.graph-container').forEach(c => c.classList.toggle(CLS.gridVisible));
     });
 
     function updateSidebar() {
@@ -712,7 +729,7 @@
 
     /* ─── Export / Auto-Layout ──────────────────────────────── */
     document.getElementById('btn-export-svg').addEventListener('click', () => {
-        document.querySelectorAll('.dropdown-menu.open').forEach(m => m.classList.remove('open'));
+        closeDropdowns();
         if (!activeTabId) return showToast('No diagram open', 'error');
         const tab = tabs.find(t => t.id === activeTabId);
         if (!tab) return;
@@ -727,13 +744,13 @@
     });
 
     document.getElementById('btn-export-png').addEventListener('click', async () => {
-        document.querySelectorAll('.dropdown-menu.open').forEach(m => m.classList.remove('open'));
+        closeDropdowns();
         if (!activeTabId) return showToast('No diagram open', 'error');
         const tab = tabs.find(t => t.id === activeTabId);
         if (!tab) return;
-        spinnerOverlay.classList.add('active');
+        spinnerOverlay.classList.add(CLS.active);
         const url = await DiagramManager.exportPNG(tab.containerId);
-        spinnerOverlay.classList.remove('active');
+        spinnerOverlay.classList.remove(CLS.active);
         if (!url) return showToast('PNG export failed', 'error');
         const a = document.createElement('a');
         a.href = url;
@@ -744,7 +761,7 @@
     });
 
     document.getElementById('btn-auto-layout').addEventListener('click', () => {
-        document.querySelectorAll('.dropdown-menu.open').forEach(m => m.classList.remove('open'));
+        closeDropdowns();
         if (!activeTabId) return showToast('No diagram open', 'error');
         const tab = tabs.find(t => t.id === activeTabId);
         if (!tab) return;
