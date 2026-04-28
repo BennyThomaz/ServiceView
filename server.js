@@ -6,6 +6,7 @@ const { exec } = require('child_process');
 const { getGraphXMLFromConfig } = require('./src/parsers/serviceConfiguration');
 const ConfigFileParser = require('./src/parsers/configFileParser');
 const SettingsFileParser = require('./src/parsers/settingsFileParser');
+const { queryRoutingTypes, queryRoutingRecords } = require('./src/routing/routingQuery');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,21 +15,48 @@ const upload = multer({ dest: path.join(__dirname, 'uploads') });
 
 // Optional default diagram loaded from a server-side folder path (process.argv[2])
 let defaultDiagram = null;
+let defaultParser  = null;
+let defaultBasePath = null;
 
 async function loadDefaultDiagram(basePath) {
-    const jsonPath = path.join(basePath, 'config', 'ServiceSettings.json');
-    const xmlPath  = path.join(basePath, 'config', 'DynamicAdaptor.xml');
+    let jsonPath, xmlPath;
+
+    const baseJsonPath = path.join(basePath, 'config', 'BasePaths.json');
+    if (fs.existsSync(baseJsonPath)) {
+        try {
+            const bp = JSON.parse(fs.readFileSync(baseJsonPath, 'utf8'));
+            const configPath  = bp?.Paths?.ConfigPath;
+            const projectRoot = bp?.Paths?.ProjectRoot;
+            if (!configPath || !projectRoot) {
+                console.warn('[default] BasePaths.json is missing ConfigPath or ProjectRoot — skipping default diagram');
+                return;
+            }
+            basePath = projectRoot;
+            jsonPath = path.join(configPath, 'ServiceSettings.json');
+            xmlPath  = path.join(configPath, 'DynamicAdaptor.xml');
+            console.log(`[default] Found BasePaths.json, using ConfigPath: ${configPath} and ProjectRoot: ${projectRoot}`);
+        } catch (err) {
+            console.warn('[default] Failed to parse BasePaths.json:', err.message);
+            return;
+        }
+    } else {
+        jsonPath = path.join(basePath, 'config', 'ServiceSettings.json');
+        xmlPath  = path.join(basePath, 'config', 'DynamicAdaptor.xml');
+    }
+
     if (!fs.existsSync(jsonPath) || !fs.existsSync(xmlPath)) {
-        console.warn(`[default] Config files not found in ${path.join(basePath, 'config')} — skipping default diagram`);
+        console.warn(`[default] Config files ${jsonPath} or ${xmlPath} not found — skipping default diagram`);
         return;
     }
     try {
         const parser = new SettingsFileParser();
         await parser.open(jsonPath, xmlPath);
-        const { graphXML, nodeProps, serviceIds } = getGraphXMLFromConfig(parser);
+        const { graphXML, nodeProps, serviceIds, serviceExtras } = getGraphXMLFromConfig(parser);
         const services = parser.getServices();
         const fileName = parser.getProjectPath() || path.basename(basePath);
-        defaultDiagram = { graphXML, nodeProps, serviceIds, services, fileName };
+        defaultDiagram  = { graphXML, nodeProps, serviceIds, serviceExtras, services, fileName };
+        defaultParser   = parser;
+        defaultBasePath = basePath;
         console.log(`[default] Loaded default diagram: ${fileName}`);
     } catch (err) {
         console.error('[default] Failed to load default diagram:', err.message);
@@ -44,9 +72,9 @@ app.post('/api/load/config', upload.single('configFile'), async (req, res) => {
     try {
         const parser = new ConfigFileParser();
         await parser.open(req.file.path);
-        const { graphXML, nodeProps, serviceIds } = getGraphXMLFromConfig(parser);
+        const { graphXML, nodeProps, serviceIds, serviceExtras } = getGraphXMLFromConfig(parser);
         const services = parser.getServices();
-        res.json({ graphXML, nodeProps, serviceIds, services, fileName: req.file.originalname });
+        res.json({ graphXML, nodeProps, serviceIds, serviceExtras, services, fileName: req.file.originalname });
     } catch (err) {
         console.error('[/api/load/config]', err);
         res.status(500).json({ error: err.message });
@@ -68,11 +96,11 @@ app.post('/api/load/json', upload.fields([
     try {
         const parser = new SettingsFileParser();
         await parser.open(jsonFile.path, xmlFile.path);
-        const { graphXML, nodeProps, serviceIds } = getGraphXMLFromConfig(parser);
+        const { graphXML, nodeProps, serviceIds, serviceExtras } = getGraphXMLFromConfig(parser);
         const services = parser.getServices();
 
         const tabName = parser.getProjectPath() || jsonFile.originalname;
-        res.json({ graphXML, nodeProps, serviceIds, services, fileName: tabName });
+        res.json({ graphXML, nodeProps, serviceIds, serviceExtras, services, fileName: tabName });
     } catch (err) {
         console.error('[/api/load/json]', err);
         res.status(500).json({ error: err.message });
@@ -99,6 +127,30 @@ app.post('/api/load/diagram', upload.single('diagramFile'), async (req, res) => 
 app.get('/api/default-diagram', (req, res) => {
     if (!defaultDiagram) return res.status(204).end();
     res.json(defaultDiagram);
+});
+
+app.get('/api/routing-available', (req, res) => {
+    res.json({ available: defaultParser !== null });
+});
+
+// GET /api/routing/:service             → { srcFormatName, types }
+// GET /api/routing/:service?rcvType=XX  → { srcFormatName, records }
+app.get('/api/routing/:service', async (req, res) => {
+    if (!defaultParser) return res.status(404).json({ error: 'No default diagram loaded' });
+    const serviceName = req.params.service;
+    const rcvType     = req.query.rcvType;
+    try {
+        if (rcvType) {
+            const result = await queryRoutingRecords(defaultParser, defaultBasePath, serviceName, rcvType);
+            res.json(result);
+        } else {
+            const result = await queryRoutingTypes(defaultParser, defaultBasePath, serviceName);
+            res.json(result);
+        }
+    } catch (err) {
+        console.error('[/api/routing]', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.listen(PORT, async () => {

@@ -10,12 +10,15 @@ Ported from the `UServiceDesigner` C# WinForms desktop application to a Node.js/
 
 - [Setup](#setup)
 - [Running the App](#running-the-app)
+  - [Default Diagram (Server-Side Path)](#default-diagram-server-side-path)
+  - [BasePaths.json Override](#basepathsjson-override)
 - [User Manual](#user-manual)
   - [Opening Files](#opening-files)
   - [Reading the Diagram](#reading-the-diagram)
   - [Navigating Diagrams](#navigating-diagrams)
   - [Focus Mode](#focus-mode)
   - [Properties Panel](#properties-panel)
+  - [Routing View](#routing-view)
   - [Connection Type Filters](#connection-type-filters)
   - [Working with Tabs](#working-with-tabs)
   - [Saving and Exporting](#saving-and-exporting)
@@ -47,6 +50,39 @@ The browser opens automatically at `http://localhost:3000`. To use a different p
 ```bash
 PORT=8080 npm start
 ```
+
+### Default Diagram (Server-Side Path)
+
+Pass a folder path as a command-line argument to pre-load a diagram on startup without requiring a file upload:
+
+```bash
+npm start "F:\Unity\Support\MyProject\Service"
+```
+
+The server looks for `config\ServiceSettings.json` and `config\DynamicAdaptor.xml` inside that folder.
+
+### BasePaths.json Override
+
+If the config folder contains a `BasePaths.json` file, it overrides the default path resolution:
+
+```
+<basePath>\config\BasePaths.json
+```
+
+**Format:**
+
+```json
+{
+  "Paths": {
+    "ConfigPath": "F:\\Unity\\Support\\EFTS\\EFTS-V6\\Service\\Config",
+    "ProjectRoot": "F:\\Unity\\Support\\EFTS\\EFTS-V6\\Service"
+  }
+}
+```
+
+When this file is present:
+- `ProjectRoot` becomes the base path used for relative database paths in routing queries
+- `ServiceSettings.json` and `DynamicAdaptor.xml` are loaded from `ConfigPath` directly (not from a `config` sub-folder)
 
 ---
 
@@ -167,18 +203,91 @@ Focus traversal is BFS across service-to-service connections only — external d
 
 ### Properties Panel
 
-Clicking a **service container** opens a Properties Panel on the right showing:
+The Properties Panel on the right updates based on what is clicked.
 
-- Service name and group
-- **Callers** — services that connect to this service
-- **Callees** — services this service connects to
-- Clicking any caller/callee name jumps the diagram to that service
+#### Service container
 
-Clicking a **source or destination node** inside a swimlane shows:
+- Service name
+- **Calls** — services this service connects to (click to jump)
+- **Called by** — services that connect to this service (click to jump)
+- **Config Databases** — database files referenced by the service's `config_db_name` attribute
+- **Additional configuration sections** — any child XML elements other than `Source` and `Destination` (e.g. `runtime_log`, `parameters`, `logging`) are shown as expandable key/value trees
+
+#### Source or destination node
 
 - Adaptor class, address, and timeout
 - All resolved adaptor parameters (key/value pairs from the config section)
 - A **Copy** button next to the address for quick clipboard copy
+
+---
+
+### Routing View
+
+For services loaded from the default server-side path (pre-loaded diagram), a **Routing** button appears in the focus bar when the service has routing configuration (`config_db_name`). Clicking it opens the routing flowchart in a new tab.
+
+#### Flowchart layout
+
+```
+┌──────────────────────────────────┐
+│  SourceName  ·  ReceiveMsgType   │  ← Start node (source + incoming message)
+└──────────────────────────────────┘
+                  │
+         ┌────────┴────────┐
+         │  ConditionName  │  ← Diamond (condition, if present)
+         └────────┬────────┘
+                  │ ──────────────→  ┌─────────────────────────────────┐
+                  │                  │  TRANSACT #1                    │
+                  │                  │  DestinationName                │
+                  │                  │      → OutputMessageName        │
+                  │                  │      ← ResponseMessageName      │
+                  │                  └─────────────────────────────────┘
+                  │
+         ┌────────┴────────────────┐
+         │  TRANSLATE #2           │
+         │  DestFormatName         │
+         │      → OutputMessage    │
+         └─────────────────────────┘
+                  │
+         ┌────────┴────────────────┐
+         │  REPLY #3               │
+         │  ↩ SourceName · MsgName │
+         └─────────────────────────┘
+                  │
+         ┌────────┴────────┐
+         │    Complete      │  ← End node
+         └──────────────────┘
+```
+
+- **Message type selector** at the top of the tab switches between all receive message types for the service
+- **Conditions** appear as diamond shapes to the left of their associated action, connected by a horizontal arrow
+- **Parallel actions** are marked with a `‖ PARALLEL` badge
+
+#### Clickable elements
+
+All underlined elements in the flowchart are clickable and show details in the Properties Panel:
+
+| Element | Properties shown |
+|---|---|
+| **Source name** (Start or Reply node) | FormatName, ParserType, Trans To, Trans From, Behavior |
+| **Destination name** (Transact or Translate) | FormatName, ParserType, Trans To, Trans From, Behavior |
+| **Message name** (any arrow) | MessageName, MessageType, Response/Request badge, Description, **Fields table** |
+| **Condition diamond** | ConditionID, Name, Expression, Description |
+
+#### Message fields table
+
+Clicking a message name shows a **Fields** section listing all message fields:
+
+| Column | Description |
+|---|---|
+| Name | Field name |
+| Variable | Variable name mapping |
+| Default | Default value |
+| Length Type | Field length type |
+| Description | Field description |
+
+#### Data sources
+
+Routing data is read from SQLite databases referenced by the service's `config_db_name` attribute. Multiple database files are supported — message names, format definitions, and field lists are searched across all listed databases.
 
 ---
 
@@ -196,7 +305,7 @@ Each file opens as a separate tab. Multiple diagrams can be open simultaneously.
 
 - **Switch tabs** — Click the tab name
 - **Close a tab** — Click the `×` on the tab
-- **Tab badge** — Shows the source type (`config`, `json`, or `xml`)
+- **Tab badge** — Shows the source type (`config`, `json`, `xml`, or `routing`)
 
 ---
 

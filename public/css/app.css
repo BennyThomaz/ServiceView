@@ -868,3 +868,67 @@ html, body { height: 100%; overflow: hidden; background: var(--bg-deep); color: 
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ── Routing Tab ──────────────────────────────────────────── */
+.routing-pane.active {
+    display: flex;
+    flex-direction: column;
+}
+
+.routing-tab-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-panel);
+    flex-shrink: 0;
+}
+
+.routing-tab-svc {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-pri);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.routing-type-select {
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-pri);
+    font-size: 12px;
+    padding: 4px 8px;
+    outline: none;
+    cursor: pointer;
+    max-width: 260px;
+    flex-shrink: 0;
+}
+.routing-type-select:focus { border-color: var(--accent); }
+
+.routing-graph-container {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-deep);
+    cursor: grab;
+}
+.routing-graph-container:active { cursor: grabbing; }
+
+.routing-empty-msg {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 32px;
+}
+
+.tab-type-routing { background: #1a1e2a; color: #6878a8; }

@@ -120,6 +120,50 @@ function renderEndpointNodes(parts, endpoints, containerId, idRef) {
     return epY;
 }
 
+function xmlToTree(el) {
+    if (!el || typeof el !== 'object') return {};
+    const result = {};
+    if (el.$ && Object.keys(el.$).length) result.attrs = { ...el.$ };
+    const t = typeof el._ === 'string' ? el._.trim() : '';
+    if (t) result.text = t;
+    const children = [];
+    for (const [k, arr] of Object.entries(el)) {
+        if (k === '$' || k === '_') continue;
+        for (const child of [].concat(arr || [])) {
+            if (typeof child === 'string') {
+                children.push({ tag: k, text: child.trim() });
+            } else {
+                children.push({ tag: k, ...xmlToTree(child) });
+            }
+        }
+    }
+    if (children.length) result.children = children;
+    return result;
+}
+
+function buildServiceExtras(parser, serviceNames) {
+    const extras = {};
+    const SKIP = new Set(['source', 'destination']);
+    for (const { name } of serviceNames) {
+        const el = parser.getService(name);
+        if (!el) continue;
+        const dbAttr = el?.$?.config_db_name || el?.$?.config_db || '';
+        const configDbNames = dbAttr.split(',').map(s => s.trim()).filter(Boolean);
+        const extraElements = [];
+        for (const [tag, arr] of Object.entries(el)) {
+            if (tag === '$' || tag === '_') continue;
+            if (SKIP.has(tag.toLowerCase())) continue;
+            for (const child of [].concat(arr || [])) {
+                extraElements.push({ tag, ...xmlToTree(child) });
+            }
+        }
+        if (configDbNames.length || extraElements.length) {
+            extras[name] = { configDbNames, extraElements };
+        }
+    }
+    return extras;
+}
+
 function getGraphXMLFromConfig(parser) {
     const defaultConnStr = parser.getConnectionStringName() || DEFAULT_CONN_STR;
     const serviceGroups = parser.getServiceGroups();
@@ -315,7 +359,8 @@ function getGraphXMLFromConfig(parser) {
     }
 
     parts.push('</root></mxGraphModel>');
-    return { graphXML: parts.join(''), nodeProps, serviceIds };
+    const serviceExtras = buildServiceExtras(parser, serviceNames);
+    return { graphXML: parts.join(''), nodeProps, serviceIds, serviceExtras };
 }
 
 function getDestination(node, destId, isSource, serviceName, defaultConnStr, parser) {

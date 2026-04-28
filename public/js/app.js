@@ -9,6 +9,7 @@
     let selectedService = null;  // service name string | null
     let isZoomed = false;
     let hiddenConnTypes = new Set();  // commsType strings currently filtered out
+    let routingAvailable = false;
 
     /* ─── Connection type definitions ──────────────────────── */
     const CONN_TYPE_DEFS = [
@@ -41,6 +42,7 @@
     const focusBtnLabel  = document.getElementById('focus-btn-label');
     const connTypeFilters= document.getElementById('conn-type-filters');
     const appEl          = document.getElementById('app');
+    const routingBtn     = document.getElementById('btn-routing');
 
     const CLS = {
         active:          'active',
@@ -52,6 +54,38 @@
         sidebarCollapsed:'sidebar-collapsed',
         gridVisible:     'grid-visible',
     };
+
+    /* ─── XML node renderer (for serviceExtras) ────────────── */
+    function renderXmlNode(node, depth) {
+        if (!node || depth > 4) return '';
+        let html = '';
+        const pad = (depth * 14) + 4;
+
+        for (const [k, v] of Object.entries(node.attrs || {})) {
+            html += `<tr><td class="props-key" style="padding-left:${pad}px">${escHtml(k)}</td><td class="props-val">${escHtml(String(v))}</td></tr>`;
+        }
+        if (node.text) {
+            html += `<tr><td class="props-key" style="padding-left:${pad}px;font-style:italic">value</td><td class="props-val">${escHtml(node.text)}</td></tr>`;
+        }
+        for (const child of node.children || []) {
+            const nameAttr  = child.attrs?.name  ? ` [${child.attrs.name}]` : '';
+            const valueAttr = child.attrs?.value ? ` = ${child.attrs.value}` : '';
+            const isLeaf = child.text && !child.children?.length
+                        && Object.keys(child.attrs || {}).length === 0;
+            const isNameValue = !child.text && !child.children?.length
+                             && child.attrs?.name && child.attrs?.value
+                             && Object.keys(child.attrs).length === 2;
+            if (isLeaf) {
+                html += `<tr><td class="props-key" style="padding-left:${pad}px">${escHtml(child.tag)}</td><td class="props-val">${escHtml(child.text)}</td></tr>`;
+            } else if (isNameValue) {
+                html += `<tr><td class="props-key" style="padding-left:${pad}px">${escHtml(child.attrs.name)}</td><td class="props-val">${escHtml(child.attrs.value)}</td></tr>`;
+            } else {
+                html += `<tr><td class="props-key" style="padding-left:${pad}px;color:#607080;font-style:italic" colspan="2">${escHtml(child.tag)}${escHtml(nameAttr)}${escHtml(valueAttr)}</td></tr>`;
+                html += renderXmlNode(child, depth + 1);
+            }
+        }
+        return html;
+    }
 
     /* ─── Properties panel ──────────────────────────────────── */
     const PropertiesPanel = {
@@ -105,7 +139,7 @@
             appEl?.classList.remove(CLS.propsCollapsed);
         },
 
-        showService(name, deps) {
+        showService(name, deps, extras) {
             const el = propsPanel;
             if (!el) return;
 
@@ -134,6 +168,22 @@
                 html += '</div>';
             } else {
                 html += '<div class="props-placeholder">No incoming connections</div>';
+            }
+
+            if (extras?.configDbNames?.length) {
+                html += `<div class="props-category">Config Databases (${extras.configDbNames.length})</div>`;
+                html += `<table class="props-table">`;
+                for (const db of extras.configDbNames) {
+                    html += `<tr><td class="props-val" colspan="2">${escHtml(db)}</td></tr>`;
+                }
+                html += `</table>`;
+            }
+
+            if (extras?.extraElements?.length) {
+                for (const node of extras.extraElements) {
+                    html += `<div class="props-category">${escHtml(node.tag)}</div>`;
+                    html += `<table class="props-table">` + renderXmlNode(node, 0) + `</table>`;
+                }
             }
 
             el.innerHTML = html;
@@ -240,6 +290,8 @@
         focusIconUnzoom.style.display = isZoomed ? '' : 'none';
         focusBtnLabel.textContent     = isZoomed ? 'Show All' : 'Focus';
         document.getElementById('btn-focus-service').title = isZoomed ? 'Show all services' : 'Focus on ' + selectedService;
+        const tab = tabs.find(t => t.id === activeTabId);
+        if (routingBtn) routingBtn.style.display = (routingAvailable && tab?.pinned) ? '' : 'none';
     }
 
     function selectService(name) {
@@ -315,6 +367,10 @@
         else zoomGraph();
     });
 
+    routingBtn?.addEventListener('click', () => {
+        if (selectedService) openRoutingTab(selectedService);
+    });
+
     /* ─── Connection type filter ────────────────────────────── */
     (function initConnTypeFilters() {
         const container = connTypeFilters;
@@ -353,7 +409,7 @@
             if (serviceName) {
                 selectService(serviceName);
                 const graph = DiagramManager.getGraph(tab.containerId);
-                if (graph) PropertiesPanel.showService(serviceName, getServiceDeps(graph, tab, serviceName));
+                if (graph) PropertiesPanel.showService(serviceName, getServiceDeps(graph, tab, serviceName), tab.serviceExtras?.[serviceName]);
                 return;
             }
             const props = tab.nodeProps?.[cid];
@@ -496,7 +552,7 @@
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error || 'Server error');
             spinnerOverlay.classList.remove(CLS.active);
-            createTab(data.fileName || fileName, mode, data.graphXML, data.services || [], data.nodeProps || {}, data.serviceIds || {});
+            createTab(data.fileName || fileName, mode, data.graphXML, data.services || [], data.nodeProps || {}, data.serviceIds || {}, data.serviceExtras || {});
         } catch (err) {
             spinnerOverlay.classList.remove(CLS.active);
             showToast(err.message, 'error');
@@ -504,10 +560,10 @@
     });
 
     /* ─── Tab management ────────────────────────────────────── */
-    function createTab(fileName, type, graphXML, services, nodeProps, serviceIds, { pinned = false } = {}) {
+    function createTab(fileName, type, graphXML, services, nodeProps, serviceIds, serviceExtras, { pinned = false } = {}) {
         const id = ++tabCounter;
         const containerId = 'graph-' + id;
-        const tab = { id, name: fileName, type, containerId, services, graphXML, nodeProps: nodeProps || {}, serviceIds: serviceIds || {}, pinned };
+        const tab = { id, name: fileName, type, containerId, services, graphXML, nodeProps: nodeProps || {}, serviceIds: serviceIds || {}, serviceExtras: serviceExtras || {}, pinned };
         tabs.push(tab);
 
         // Tab button
@@ -601,6 +657,213 @@
                 updateSidebar();
             }
         }
+    }
+
+    /* ─── Routing tab ───────────────────────────────────────── */
+    async function openRoutingTab(serviceName) {
+        const existing = tabs.find(t => t.type === 'routing' && t.serviceName === serviceName);
+        if (existing) { activateTab(existing.id); return; }
+
+        spinnerOverlay.classList.add(CLS.active);
+        try {
+            const resp = await fetch(`/api/routing/${encodeURIComponent(serviceName)}`);
+            const data = await resp.json();
+            spinnerOverlay.classList.remove(CLS.active);
+
+            if (!data.types?.length) {
+                showToast('No routing configuration for this service', 'error');
+                return;
+            }
+
+            const tabId = ++tabCounter;
+            const tab = {
+                id: tabId, name: `Routing · ${serviceName}`, type: 'routing',
+                containerId: `routing-graph-${tabId}`,
+                serviceName, srcFormatName: data.srcFormatName,
+                types: data.types, routingRecords: [],
+                services: [], nodeProps: {}, serviceIds: {}
+            };
+            tabs.push(tab);
+
+            // Tab button
+            const tabEl = document.createElement('div');
+            tabEl.className = 'tab';
+            tabEl.dataset.tabId = tabId;
+            tabEl.innerHTML = `
+                <span class="tab-type-badge tab-type-routing">routing</span>
+                <span class="tab-name" title="${escHtml(tab.name)}">${escHtml(tab.name)}</span>
+                <span class="tab-close" data-close="${tabId}" title="Close">×</span>`;
+            tabEl.addEventListener('click', e => {
+                if (e.target.dataset.close) { closeTab(+e.target.dataset.close); return; }
+                activateTab(tabId);
+            });
+            tabBar.appendChild(tabEl);
+
+            // Pane
+            const pane = document.createElement('div');
+            pane.className = 'graph-pane routing-pane';
+            pane.id = 'pane-' + tabId;
+            pane.innerHTML = `
+                <div class="routing-tab-header">
+                    <span class="routing-tab-svc">${escHtml(serviceName)}</span>
+                    <select class="routing-type-select" id="routing-sel-${tabId}"></select>
+                </div>
+                <div class="routing-graph-container" id="routing-graph-${tabId}"></div>`;
+
+            const sel = pane.querySelector(`#routing-sel-${tabId}`);
+            for (const t of data.types) {
+                const opt = document.createElement('option');
+                opt.value = opt.textContent = t;
+                sel.appendChild(opt);
+            }
+            sel.addEventListener('change', function () {
+                loadRoutingRecords(tabId, serviceName, this.value);
+            });
+
+            diagramArea.appendChild(pane);
+            activateTab(tabId);
+            await loadRoutingRecords(tabId, serviceName, data.types[0]);
+        } catch (err) {
+            spinnerOverlay.classList.remove(CLS.active);
+            showToast('Error loading routing: ' + err.message, 'error');
+        }
+    }
+
+    async function loadRoutingRecords(tabId, serviceName, rcvType) {
+        const tab = tabs.find(t => t.id === tabId);
+        if (!tab) return;
+        const container = document.getElementById(tab.containerId);
+        if (!container) return;
+
+        try {
+            const resp = await fetch(`/api/routing/${encodeURIComponent(serviceName)}?rcvType=${encodeURIComponent(rcvType)}`);
+            const data = await resp.json();
+
+            if (!data.records?.length) {
+                DiagramManager.destroy(tab.containerId);
+                container.innerHTML = `<div class="routing-empty-msg">No routing records for "${rcvType}".</div>`;
+                tab.routingRecords = [];
+                return;
+            }
+
+            tab.routingRecords      = data.records;
+            tab.routingFormats      = data.formats       || {};
+            tab.routingMessageFields = data.messageFields || {};
+            DiagramManager.renderRouting(tab.containerId, data.records, data.srcFormatName, rcvType, data.sourceName,
+                { name: data.rcvMsgName, isResp: !!data.rcvMsgIsResp, desc: data.rcvMsgDesc || '' },
+                (cellId, recIdx, rclick) => {
+                    if (rclick?.rclick === 'msg') {
+                        showRoutingMsgProps(rclick, tab);
+                    } else if (rclick?.rclick === 'dst') {
+                        showRoutingFormatProps(rclick.dstName, rclick.fmtName, tab.routingFormats[rclick.fmtName]);
+                    } else if (rclick?.rclick === 'src') {
+                        showRoutingFormatProps(rclick.srcName, rclick.fmtName, tab.routingFormats[rclick.fmtName]);
+                    } else if (rclick?.rclick === 'cond') {
+                        showRoutingCondProps(tab.routingRecords[parseInt(rclick.condIdx)]);
+                    } else if (recIdx != null) {
+                        showRoutingProps(tab.routingRecords[recIdx]);
+                    } else {
+                        PropertiesPanel.clear();
+                    }
+                }
+            );
+        } catch {
+            DiagramManager.destroy(tab.containerId);
+            container.innerHTML = `<div class="routing-empty-msg">Error loading routing records.</div>`;
+            tab.routingRecords = [];
+        }
+    }
+
+    function showRoutingProps(rec) {
+        if (!propsPanel) return;
+        propsPanel.innerHTML = '<div class="props-placeholder">Select a message or destination for details.</div>';
+        appEl?.classList.remove(CLS.propsCollapsed);
+    }
+
+    function showRoutingMsgProps(attrs, tab) {
+        if (!propsPanel) return;
+        const isResp = attrs.msgIsresp === '1';
+
+        const fieldKey = `${attrs.fmtName}|${attrs.msgType}`;
+        const fields   = tab?.routingMessageFields?.[fieldKey] || [];
+        let fieldsHtml = '';
+        if (fields.length) {
+            const th = (label) => `<th style="text-align:left;padding:3px 6px;font-weight:600;color:#607080;white-space:nowrap">${escHtml(label)}</th>`;
+            const td = (val, extra = '') => `<td style="padding:3px 6px;${extra}">${escHtml(val != null ? String(val) : '')}</td>`;
+            fieldsHtml  = `<div class="props-category">Fields (${fields.length})</div>`;
+            fieldsHtml += `<div style="overflow-x:auto;padding:0 4px 6px">`;
+            fieldsHtml += `<table style="width:100%;border-collapse:collapse;font-size:10px;font-family:sans-serif">`;
+            fieldsHtml += `<tr style="border-bottom:1px solid #2a3040">${th('Name')}${th('Variable')}${th('Default')}${th('Length Type')}${th('Description')}</tr>`;
+            for (const f of fields) {
+                fieldsHtml += `<tr style="border-bottom:1px solid #1a2030;color:#c0ccd8">
+                    ${td(f.Name   || '—', 'font-weight:600;color:#e0e8f0;white-space:nowrap')}
+                    ${td(f.VariableName || '', 'font-family:monospace;color:#90a8c0')}
+                    ${td(f.Default     != null ? String(f.Default) : '', 'font-family:monospace')}
+                    ${td(f.LengthType  || '—')}
+                    ${td(f.Description || '', 'color:#8090a0')}
+                </tr>`;
+            }
+            fieldsHtml += `</table></div>`;
+        }
+
+        propsPanel.innerHTML =
+            `<div class="props-node-header">
+                <span class="props-node-name">${escHtml(attrs.msgName || attrs.msgType)}</span>
+                <span class="props-badge ${isResp ? 'props-badge-dest' : 'props-badge-src'}">${isResp ? 'Response' : 'Request'}</span>
+             </div>
+             <div class="props-category">Message</div>
+             <table class="props-table">
+               <tr><td class="props-key">type</td><td class="props-val">${escHtml(attrs.msgType)}</td></tr>
+               <tr><td class="props-key">response</td><td class="props-val">${isResp ? 'Yes' : 'No'}</td></tr>
+               <tr><td class="props-key">description</td><td class="props-val">${escHtml(attrs.msgDesc || '—')}</td></tr>
+             </table>
+             ${fieldsHtml}`;
+        appEl?.classList.remove(CLS.propsCollapsed);
+    }
+
+    function showRoutingFormatProps(displayName, formatName, fmt) {
+        if (!propsPanel) return;
+        let behaviorRows = '';
+        if (fmt?.behavior) {
+            for (const pair of fmt.behavior.split(',')) {
+                const colon = pair.indexOf(':');
+                if (colon < 0) continue;
+                const k = pair.slice(0, colon).trim();
+                const v = pair.slice(colon + 1).trim();
+                if (k) behaviorRows += `<tr><td class="props-key" style="padding-left:16px">${escHtml(k)}</td><td class="props-val">${escHtml(v)}</td></tr>`;
+            }
+        }
+        propsPanel.innerHTML =
+            `<div class="props-node-header">
+                <span class="props-node-name">${escHtml(displayName || formatName || '—')}</span>
+                <span class="props-badge" style="background:#0e2030;color:#3878a0">Format</span>
+             </div>
+             <div class="props-category">Format</div>
+             <table class="props-table">
+               <tr><td class="props-key">FormatName</td><td class="props-val">${escHtml(formatName || '—')}</td></tr>
+               <tr><td class="props-key">ParserType</td><td class="props-val">${escHtml(fmt?.parserType || '—')}</td></tr>
+               <tr><td class="props-key">Trans To</td><td class="props-val">${escHtml(fmt?.trans_to || '—')}</td></tr>
+               <tr><td class="props-key">Trans From</td><td class="props-val">${escHtml(fmt?.trans_from || '—')}</td></tr>
+               ${fmt?.behavior != null ? `<tr><td class="props-key">Behavior</td><td class="props-val"></td></tr>${behaviorRows}` : ''}
+             </table>`;
+        appEl?.classList.remove(CLS.propsCollapsed);
+    }
+
+    function showRoutingCondProps(rec) {
+        if (!propsPanel || !rec) return;
+        propsPanel.innerHTML =
+            `<div class="props-node-header">
+                <span class="props-node-name">${escHtml(rec.ConditionName || 'Condition ' + rec.conditionID)}</span>
+                <span class="props-badge" style="background:#1c1800;color:#c09828">Condition</span>
+             </div>
+             <div class="props-category">Condition</div>
+             <table class="props-table">
+               <tr><td class="props-key">id</td><td class="props-val">${escHtml(String(rec.conditionID))}</td></tr>
+               <tr><td class="props-key">name</td><td class="props-val">${escHtml(rec.ConditionName || '—')}</td></tr>
+               <tr><td class="props-key">expression</td><td class="props-val" style="font-family:monospace">${escHtml(rec.ConditionExpression || '—')}</td></tr>
+               <tr><td class="props-key">description</td><td class="props-val">${escHtml(rec.ConditionDescription || '—')}</td></tr>
+             </table>`;
+        appEl?.classList.remove(CLS.propsCollapsed);
     }
 
     /* ─── Save diagram ──────────────────────────────────────── */
@@ -785,8 +1048,11 @@
             if (!resp.ok || resp.status === 204) return;
             const data = await resp.json();
             if (data.graphXML) {
-                createTab(data.fileName || 'Default', 'json', data.graphXML, data.services || [], data.nodeProps || {}, data.serviceIds || {}, { pinned: true });
+                createTab(data.fileName || 'Default', 'json', data.graphXML, data.services || [], data.nodeProps || {}, data.serviceIds || {}, data.serviceExtras || {}, { pinned: true });
             }
+            const ra = await fetch('/api/routing-available');
+            const rad = await ra.json();
+            routingAvailable = !!rad.available;
         } catch {
             // No default diagram available
         }
